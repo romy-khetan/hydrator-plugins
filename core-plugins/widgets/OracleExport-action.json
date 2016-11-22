@@ -14,7 +14,7 @@
         {
           "widget-type": "textbox",
           "label": "Oracle Server Port",
-          "name": "oracleServerPort"
+          "name": "oracleServerSSHPort"
         },
         {
           "widget-type": "textbox",

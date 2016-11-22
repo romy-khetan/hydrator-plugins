@@ -19,7 +19,7 @@ Properties
 
 **oracleServerHostname:** Hostname of the remote Oracle Host.
 
-**oracleServerPort:** Port to use to SSH to the remote Oracle Host. Defaults to 22.
+**oracleServerSSHPort:** Port to use to SSH to the remote Oracle Host. Defaults to 22.
 
 **oracleServerUsername:** Username to use to connect to the remote Oracle Host via SSH.
 
@@ -34,11 +34,10 @@ This will be used to run the Oracle Spool utility.
 
 **oracleSID:** Oracle System ID(SID). This is used to uniquely identify a particular database on the system.
 
-**queryToExecute:** Query to be executed to export.
-For example: select * from test where name='cask';
+**queryToExecute:** Query to be executed to export.For example: ``select * from test where name='cask'``;
 
 **tmpSQLScriptDirectory:** Path to the directory where temporary SQL script needs to be created. It will be removed
-once the SQL command is executed.
+once the SQL command is executed.  Default directory is /tmp.
 
 **outputPath:** Path where output file will be exported.
 
@@ -62,7 +61,7 @@ This example exports data from oracle server example.com using oracle user:
           },
           "properties": {
               "oracleServerHostname": "example.com",
-              "oracleServerPort": "22",
+              "oracleServerSSHPort": "22",
               "oracleServerUsername": "oracle",
               "oracleServerPassword": "oracle@123",
               "dbUsername": "system",

@@ -70,7 +70,6 @@ public class OracleExportActionTest extends ETLBatchTestBase {
   public static void cleanupMiniDFS() throws Exception {
     // Shutdown MiniDFSCluster
     dfsCluster.shutdown();
-    TEMP_FOLDER.delete();
     if (sshServer != null) {
       sshServer.stop();
     }
@@ -92,7 +91,7 @@ public class OracleExportActionTest extends ETLBatchTestBase {
     return sshServer;
   }
 
-  @Test
+  @Test(expected = SSHAuthenticationException.class)
   public void testCheckWrongArgumentForServerPassword() throws Exception {
     OracleExportAction.OracleExportActionConfig oracleExportActionConfig =
       new OracleExportAction.OracleExportActionConfig(sshServer.getHost(),
@@ -101,13 +100,8 @@ public class OracleExportActionTest extends ETLBatchTestBase {
                                                       "select * from test;", "/tmp", "csv");
     OracleExportAction oracleExportAction = new OracleExportAction(oracleExportActionConfig);
     MockActionContext mockActionContext = new MockActionContext();
-    try {
       oracleExportAction.run(mockActionContext);
-    } catch (IllegalStateException e) {
-      Assert.assertEquals(String.format("SSH authentication error when connecting to %s@%s on port %d",
-                                        USER, sshServer.getHost(),
-                                        sshServer.getPort()), e.getMessage());
-    }
+      Assert.fail();
   }
 
   @Test
@@ -119,11 +113,11 @@ public class OracleExportActionTest extends ETLBatchTestBase {
                                                       "select * from test;", "/tmp", "format");
 
     try {
-    MockPipelineConfigurer configurer = new MockPipelineConfigurer(null);
-    new OracleExportAction(oracleExportActionConfig).configurePipeline(configurer);
+      MockPipelineConfigurer configurer = new MockPipelineConfigurer(null);
+      new OracleExportAction(oracleExportActionConfig).configurePipeline(configurer);
     } catch (IllegalArgumentException e) {
       Assert.assertEquals(String.format("Invalid format '%s'. Must be one of %s", "format",
-                      EnumSet.allOf(OracleExportAction.SeparatorFormat.class)), e.getMessage());
+                                        EnumSet.allOf(OracleExportAction.SeparatorFormat.class)), e.getMessage());
     }
   }
 

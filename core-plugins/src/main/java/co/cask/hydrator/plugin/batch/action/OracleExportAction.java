@@ -49,9 +49,9 @@ import javax.annotation.Nullable;
  */
 @Plugin(type = Action.PLUGIN_TYPE)
 @Name("OracleExport")
-@Description("A Hydrator Action plugin to efficiently export data from Oracle to HDFS or local file system." +
-  "The plugin uses Oracle's command line tools to export data." +
-  "The data exported from this tool can then be used in Hydrator pipelines.")
+@Description("A Hydrator Action plugin to efficiently export data from Oracle to HDFS or local file system. " +
+  "The plugin uses Oracle's command line tools to export data. The data exported from this tool can then " +
+  "be used in Hydrator pipelines.")
 public class OracleExportAction extends Action {
   enum SeparatorFormat {
     csv, tsv, psv
@@ -70,16 +70,15 @@ public class OracleExportAction extends Action {
   @Override
   public void run(ActionContext context) throws Exception {
     String oracleExportCommand = buildOracleExportCommand();
-    Connection connection = new Connection(config.oracleServerHostname, config.oracleServerPort);
+    Connection connection = new Connection(config.oracleServerHostname, config.oracleServerSSHPort);
     try {
       connection.connect();
       boolean isAuthenticated = connection.authenticateWithPassword(config.oracleServerUsername,
                                                                     config.oracleServerPassword);
       if (!isAuthenticated) {
-
-        throw new IllegalStateException(String.format("SSH authentication error when connecting to %s@%s on port %d",
-                                            config.oracleServerUsername, config.oracleServerHostname,
-                                            config.oracleServerPort));
+        throw new SSHAuthenticationException("SSH authentication error when connecting to %s@%s on port %d",
+                                             config.oracleServerUsername, config.oracleServerHostname,
+                                            config.oracleServerSSHPort);
       }
       Session session = connection.openSession();
       session.execCommand(oracleExportCommand);
@@ -101,7 +100,7 @@ public class OracleExportAction extends Action {
         Path file = new Path(config.outputPath);
         FileSystem fs = FileSystem.get(file.toUri(), new Configuration());
         try (FSDataOutputStream outStream = fs.create(file);
-          BufferedWriter br = new BufferedWriter(new OutputStreamWriter(outStream, "UTF-8"))) {
+             BufferedWriter br = new BufferedWriter(new OutputStreamWriter(outStream, "UTF-8"))) {
           br.write(out.replaceAll("(?m)^[\\s&&[^\\n]]+|[\\s+&&[^\\n]]+$", "")); //Removes multiline trailing spaces
         }
       }
@@ -110,25 +109,23 @@ public class OracleExportAction extends Action {
     }
   }
 
-  private String validateQuery(String query) {
-    if (!query.trim().endsWith(";")) {
-      query += ';';
-    }
-    return query;
-  }
-
   private String buildOracleExportCommand() {
     String dbConnectionString = config.dbUsername + "/" + config.dbPassword + "@" + config.oracleSID;
     String colSeparator = getColSeparator(config.format);
     StringBuilder scriptContent = new StringBuilder();
     scriptContent.append("set colsep " + "\"" + colSeparator + "\"" + "\n");
-    scriptContent.append("set linesize 10000" + "\n");
+
+    // 32767 is  the maximum limit a linesixe is allowed.
+    scriptContent.append("set linesize 32767" + "\n");
     scriptContent.append("set newpage none" + "\n");
     scriptContent.append("set wrap off" + "\n");
+
+    // Set 0 to prevent printing of headings and avoid page breaks
     scriptContent.append("set pagesize 0" + "\n");
+
     scriptContent.append("set heading off" + "\n");
     scriptContent.append("spool on" + "\n");
-    scriptContent.append(validateQuery(config.queryToExecute) + "\n");
+    scriptContent.append(config.queryToExecute + "\n");
     scriptContent.append("spool off" + "\n");
     scriptContent.append("exit");
     String tmpSqlScriptFile = config.tmpSQLScriptDirectory + "/tmpHydrator.sql";
@@ -142,7 +139,7 @@ public class OracleExportAction extends Action {
   }
 
   private String getColSeparator(String format) {
-    String columnSeparator = "";
+    String columnSeparator = new String();
     switch (SeparatorFormat.valueOf(format)) {
       case csv:
         columnSeparator = ",";
@@ -169,7 +166,7 @@ public class OracleExportAction extends Action {
     @Nullable
     @Description("Port to use to SSH to the remote Oracle Host. Defaults to 22.")
     @Macro
-    private Integer oracleServerPort;
+    private Integer oracleServerSSHPort;
 
     @Description("Username to use to connect to the remote Oracle Host via SSH.")
     @Macro
@@ -201,8 +198,9 @@ public class OracleExportAction extends Action {
     @Macro
     private String queryToExecute;
 
+    @Nullable
     @Description("Path to the directory where temporary SQL script needs to be created. It will be removed " +
-      "once the SQL command is executed.")
+      "once the SQL command is executed. Default directory is /tmp.")
     @Macro
     private String tmpSQLScriptDirectory;
 
@@ -215,7 +213,8 @@ public class OracleExportAction extends Action {
     private String format;
 
     public OracleExportActionConfig() {
-      this.oracleServerPort = 22;
+      this.oracleServerSSHPort  = 22;
+      this.tmpSQLScriptDirectory = "/tmp";
     }
 
     public OracleExportActionConfig(String oracleServerHostname, @Nullable Integer oracleServerPort,
@@ -225,7 +224,7 @@ public class OracleExportAction extends Action {
                                     String outputPath, String queryToExecute, String tmpSQLScriptDirectory,
                                     String format) {
       this.oracleServerHostname = oracleServerHostname;
-      this.oracleServerPort = oracleServerPort;
+      this.oracleServerSSHPort  = oracleServerPort;
       this.oracleServerUsername = oracleServerUsername;
       this.oracleServerPassword = oracleServerPassword;
       this.dbUsername = dbUsername;
@@ -239,12 +238,15 @@ public class OracleExportAction extends Action {
     }
 
     public void validate() {
-      if (!containsMacro("oracleServerPort") && oracleServerPort < 0) {
+      if (!containsMacro("oracleServerPort") && oracleServerSSHPort  < 0) {
         throw new IllegalArgumentException("Port cannot be negative");
       }
       if (!EnumUtils.isValidEnum(SeparatorFormat.class, format)) {
         throw new IllegalArgumentException(
           String.format("Invalid format '%s'. Must be one of %s", format, EnumSet.allOf(SeparatorFormat.class)));
+      }
+      if (!queryToExecute.trim().endsWith(";")) {
+        queryToExecute += ';';
       }
     }
   }
