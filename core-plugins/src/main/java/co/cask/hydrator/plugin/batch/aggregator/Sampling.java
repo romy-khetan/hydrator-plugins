@@ -17,23 +17,29 @@
 package co.cask.hydrator.plugin.batch.aggregator;
 
 import co.cask.cdap.api.annotation.Description;
+import co.cask.cdap.api.annotation.Name;
+import co.cask.cdap.api.annotation.Plugin;
 import co.cask.cdap.api.data.format.StructuredRecord;
 import co.cask.cdap.api.data.schema.Schema;
 import co.cask.cdap.etl.api.Emitter;
 import co.cask.cdap.etl.api.batch.BatchAggregator;
 import co.cask.cdap.etl.api.batch.BatchAggregatorContext;
-import co.cask.cdap.etl.api.batch.BatchRuntimeContext;
-import com.google.common.collect.Iterables;
 import org.apache.commons.collections.IteratorUtils;
 import org.apache.commons.collections.buffer.PriorityBuffer;
 
-import java.sql.Struct;
-import java.util.*;
+import javax.annotation.Nullable;
+import java.util.Random;
+import java.util.Iterator;
+import java.util.List;
+import java.util.ArrayList;
 
 /**
- *Sampling
+ * Sampling plugin to sample random data from large dataset flowing through the plugin.
  */
-public class Sampling extends BatchAggregator<String, StructuredRecord, StructuredRecord>{
+@Plugin(type = BatchAggregator.PLUGIN_TYPE)
+@Name("Sampling")
+@Description("Sampling a large dataset flowing through this plugin to pull random records.")
+public class Sampling extends BatchAggregator<String, StructuredRecord, StructuredRecord> {
 
     private enum TYPE {
         SYSTEMATIC, RESERVOIR
@@ -51,11 +57,6 @@ public class Sampling extends BatchAggregator<String, StructuredRecord, Structur
     }
 
     @Override
-    public void initialize(BatchRuntimeContext context) throws Exception {
-
-    }
-
-    @Override
     public void groupBy(StructuredRecord record, Emitter<String> emitter) throws Exception {
         emitter.emit("sample");
     }
@@ -63,17 +64,21 @@ public class Sampling extends BatchAggregator<String, StructuredRecord, Structur
     @Override
     public void aggregate(String groupKey, Iterator<StructuredRecord> iterator,
                           Emitter<StructuredRecord> emitter) throws Exception {
+        int finalSampleSize = config.sampleSize;
+        if(config.samplePercentage != null) {
+            finalSampleSize = Math.round((config.samplePercentage / 100) * config.totalRecords);
+        }
+
         switch(TYPE.valueOf(config.samplingType.toUpperCase())) {
             case SYSTEMATIC:
-                int finalSampleSize = config.sampleSize;
-                if(config.overSamplingPercentage != null) {
+                if (config.overSamplingPercentage != null) {
                     finalSampleSize = Math.round(finalSampleSize +
                             (finalSampleSize * (config.overSamplingPercentage / 100)));
                 }
 
                 int sampleIndex = Math.round(config.totalRecords / finalSampleSize);
                 Float random = new Float(0);
-                if(config.random != null) {
+                if (config.random != null) {
                     random = config.random;
                 } else {
                     random = new Random().nextFloat();
@@ -84,7 +89,7 @@ public class Sampling extends BatchAggregator<String, StructuredRecord, Structur
                 emitter.emit(records.get(firstSampleIndex));
                 counter++;
 
-                while(counter < finalSampleSize) {
+                while (counter < finalSampleSize) {
                     int index = firstSampleIndex + (counter * sampleIndex);
                     emitter.emit(records.get(index - 1));
                     counter++;
@@ -97,7 +102,7 @@ public class Sampling extends BatchAggregator<String, StructuredRecord, Structur
                     public int compare(StructuredRecord o1, StructuredRecord o2) {
                         if ((float) o1.get("random") < (float) o1.get("random")) {
                             return 1;
-                        } else if((float) o1.get("random") > (float) o1.get("random")) {
+                        } else if ((float) o1.get("random") > (float) o1.get("random")) {
                             return -1;
                         } else {
                             return 0;
@@ -106,43 +111,37 @@ public class Sampling extends BatchAggregator<String, StructuredRecord, Structur
                 });
 
                 Schema inputSchema = null;
+                Schema schemaWithRandomField = null;
                 int count = 1;
                 Random randomValue = new Random();
-                while(count <= config.sampleSize) {
+                while (count <= finalSampleSize) {
                     StructuredRecord record = iterator.next();
-                    inputSchema = record.getSchema();
-/*                    StructuredRecord.Builder builder =
-                            StructuredRecord.builder(createSchemaWithRandomField(inputSchema));
-                    for(Schema.Field field : record.getSchema().getFields()) {
-                        builder.set(field.getName(), record.get(field.getName()));
+                    if(inputSchema == null) {
+                        inputSchema = record.getSchema();
                     }
-                    builder.set("random", randomValue.nextFloat());*/
-                    sampleData.add(getBuilder(record, randomValue.nextFloat(), createSchemaWithRandomField(inputSchema)));
-                    //sampleData.add(builder.build());
+                    if(schemaWithRandomField == null) {
+                        schemaWithRandomField = createSchemaWithRandomField(inputSchema);
+                    }
+                    sampleData.add(getSampledRecord(record, randomValue.nextFloat(), schemaWithRandomField));
+                    count++;
                 }
 
-                while(iterator.hasNext()) {
+                while(iterator.hasNext()) { //check it
                     StructuredRecord structuredRecord = (StructuredRecord) sampleData.get();
                     Float randomFloat = randomValue.nextFloat();
-                    if((float) structuredRecord.get("random") < randomFloat) {
+                    if ((float) structuredRecord.get("random") < randomFloat) {
                         sampleData.remove();
                         StructuredRecord record = iterator.next();
-                        /*StructuredRecord.Builder builder =
-                                StructuredRecord.builder();
-                        for(Schema.Field field : record.getSchema().getFields()) {
-                            builder.set(field.getName(), record.get(field.getName()));
-                        }
-                        builder.set("random", randomFloat);*/
-                        sampleData.add(getBuilder(record, randomFloat, structuredRecord.getSchema()));                    }
+                        sampleData.add(getSampledRecord(record, randomFloat, structuredRecord.getSchema()));                    }
                 }
 
                 Iterator<StructuredRecord> sampleDataIterator = sampleData.iterator();
-                while(sampleDataIterator.hasNext()) {
+                while (sampleDataIterator.hasNext()) {
                     StructuredRecord sampledRecord = sampleDataIterator.next();
                     StructuredRecord.Builder builder =
                             StructuredRecord.builder(inputSchema);
-                    for(Schema.Field field : sampledRecord.getSchema().getFields()) {
-                        if(!field.getName().equalsIgnoreCase("random")) {
+                    for (Schema.Field field : sampledRecord.getSchema().getFields()) {
+                        if (!field.getName().equalsIgnoreCase("random")) {
                             builder.set(field.getName(), sampledRecord.get(field.getName()));
                         }
                     }
@@ -152,10 +151,9 @@ public class Sampling extends BatchAggregator<String, StructuredRecord, Structur
 
     }
 
-    public StructuredRecord getBuilder(StructuredRecord record, Float random, Schema schema) {
-        StructuredRecord.Builder builder =
-                StructuredRecord.builder(schema);
-        for(Schema.Field field : record.getSchema().getFields()) {
+    public StructuredRecord getSampledRecord(StructuredRecord record, Float random, Schema schema) {
+        StructuredRecord.Builder builder = StructuredRecord.builder(schema);
+        for (Schema.Field field : record.getSchema().getFields()) {
             builder.set(field.getName(), record.get(field.getName()));
         }
         builder.set("random", random);
@@ -175,29 +173,47 @@ public class Sampling extends BatchAggregator<String, StructuredRecord, Structur
     }
 
     /**
-     * Config for Sampling Aggregator Plugin.
+     * Config for Sampling Plugin.
      */
     public class SamplingConfig extends AggregatorConfig {
 
-        @Description("Name of the column in the input record which will be used to group the raw data. For Example, " +
-                "id.")
+        @Nullable
+        @Description("The number of records that needs to be sampled from the input records.")
         private Integer sampleSize;
 
-        @Description("")
+        @Nullable
+        @Description("The percenatage of records that needs to be sampled from the input records.")
         private Float samplePercentage;
 
-        @Description("")
-        private Float overSamplingPercentage;
-
-        @Description("")
-        private Float random;
-
-        @Description("")
+        @Description("Type of the Sampling algorithm that needs to be used to sample the data.")
         private String samplingType;
 
-        @Description("")
+        @Nullable
+        @Description("The percenatage of additional records that needs to be included in addition to the input " +
+                "sample size to account for oversampling to be used in Systematic Sampling.")
+        private Float overSamplingPercentage;
+
+        @Nullable
+        @Description("Random float value between 0 and 1 to be used in Systematic Sampling.")
+        private Float random;
+
+        @Nullable
+        @Description("Total number od input records.")
         private Integer totalRecords;
 
-    }
+        public SamplingConfig() {
+            this.random = new Random().nextFloat();
+        }
 
+        public SamplingConfig(@Nullable Integer sampleSize, @Nullable Float samplePercentage,
+                              @Nullable Float overSamplingPercentage, @Nullable Float random,
+                              String samplingType, @Nullable Integer totalRecords) {
+            this.sampleSize = sampleSize;
+            this.samplePercentage = samplePercentage;
+            this.overSamplingPercentage = overSamplingPercentage;
+            this.random = random;
+            this.samplingType = samplingType;
+            this.totalRecords = totalRecords;
+        }
+    }
 }
