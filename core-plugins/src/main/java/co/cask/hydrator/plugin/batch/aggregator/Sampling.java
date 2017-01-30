@@ -27,11 +27,12 @@ import co.cask.cdap.etl.api.batch.BatchAggregatorContext;
 import org.apache.commons.collections.IteratorUtils;
 import org.apache.commons.collections.buffer.PriorityBuffer;
 
-import javax.annotation.Nullable;
-import java.util.Random;
+import java.util.ArrayList;
+import java.util.Comparator;
 import java.util.Iterator;
 import java.util.List;
-import java.util.ArrayList;
+import java.util.Random;
+import javax.annotation.Nullable;
 
 /**
  * Sampling plugin to sample random data from large dataset flowing through the plugin.
@@ -65,7 +66,7 @@ public class Sampling extends BatchAggregator<String, StructuredRecord, Structur
     public void aggregate(String groupKey, Iterator<StructuredRecord> iterator,
                           Emitter<StructuredRecord> emitter) throws Exception {
         int finalSampleSize = config.sampleSize;
-        if(config.samplePercentage != null) {
+        if (config.samplePercentage != null) {
             finalSampleSize = Math.round((config.samplePercentage / 100) * config.totalRecords);
         }
 
@@ -110,29 +111,41 @@ public class Sampling extends BatchAggregator<String, StructuredRecord, Structur
                     }
                 });
 
-                Schema inputSchema = null;
-                Schema schemaWithRandomField = null;
-                int count = 1;
+                /*Schema inputSchema = null;
+                Schema schemaWithRandomField = null;*/
+                /*int count = 1;*/
+                int count = 0;
                 Random randomValue = new Random();
-                while (count <= finalSampleSize) {
-                    StructuredRecord record = iterator.next();
-                    if(inputSchema == null) {
+                List<StructuredRecord> recordss = IteratorUtils.toList(iterator);
+                Schema inputSchema = recordss.get(0).getSchema();
+                Schema schemaWithRandomField = createSchemaWithRandomField(inputSchema);;
+                /*while (count <= finalSampleSize) {*/
+                while (count < finalSampleSize) {
+                    /*StructuredRecord record = iterator.next();*/
+                    StructuredRecord record = recordss.get(0);
+/*                    if(inputSchema == null) {
                         inputSchema = record.getSchema();
                     }
                     if(schemaWithRandomField == null) {
                         schemaWithRandomField = createSchemaWithRandomField(inputSchema);
-                    }
+                    }*/
                     sampleData.add(getSampledRecord(record, randomValue.nextFloat(), schemaWithRandomField));
                     count++;
                 }
 
-                while(iterator.hasNext()) { //check it
+               /* while(iterator.hasNext()) { *///check it
+                while(count < recordss.size()) {
+                /*for (int i = count; i < recordss.size(); i++) {*/
                     StructuredRecord structuredRecord = (StructuredRecord) sampleData.get();
                     Float randomFloat = randomValue.nextFloat();
                     if ((float) structuredRecord.get("random") < randomFloat) {
                         sampleData.remove();
-                        StructuredRecord record = iterator.next();
-                        sampleData.add(getSampledRecord(record, randomFloat, structuredRecord.getSchema()));                    }
+                        /*StructuredRecord record = iterator.next();*/ //old
+                        /*StructuredRecord record = recordss.get(i);*/
+                        StructuredRecord record = recordss.get(count);
+                        sampleData.add(getSampledRecord(record, randomFloat, structuredRecord.getSchema()));
+                    }
+                    count++;
                 }
 
                 Iterator<StructuredRecord> sampleDataIterator = sampleData.iterator();
